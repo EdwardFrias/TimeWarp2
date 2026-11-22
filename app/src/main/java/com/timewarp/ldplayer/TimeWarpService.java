@@ -31,6 +31,7 @@ public class TimeWarpService extends Service {
     public static final String EXTRA_DAYS_PER_SEC = "days_per_sec";
     public static final String EXTRA_REVERSE = "reverse";
     public static final String EXTRA_LOOP = "loop";
+    public static final String EXTRA_RESTORE = "restore"; // solo en ACTION_STOP
 
     private static final String CHANNEL_ID = "timewarp";
     private static final int NOTIF_ID = 1;
@@ -73,7 +74,10 @@ public class TimeWarpService extends Service {
 
         if (ACTION_STOP.equals(action)) {
             if (worker != null) {
-                requestStop("Detenido: hora real restaurada", true);
+                boolean restore = intent.getBooleanExtra(EXTRA_RESTORE, false);
+                requestStop(restore
+                        ? "Detenido: hora real restaurada"
+                        : "Detenido: el reloj se queda en la hora actual", restore);
             } else {
                 stopSelf();
             }
@@ -173,7 +177,7 @@ public class TimeWarpService extends Service {
                     virtual = startWall;
                     loops++;
                 } else {
-                    requestStop("Límite de fecha alcanzado (1971–2037): hora real restaurada", true);
+                    requestStop("Límite de fecha alcanzado (1971–2037): reloj detenido", false);
                     return;
                 }
             }
@@ -187,7 +191,7 @@ public class TimeWarpService extends Service {
                     reopenShell();
                 }
                 if (failures >= 10) {
-                    requestStop("Fallo repetido al cambiar la hora; detenido.", true);
+                    requestStop("Fallo repetido al cambiar la hora; detenido.", false);
                 }
             }
         } catch (Throwable t) {
@@ -238,7 +242,9 @@ public class TimeWarpService extends Service {
                 }
             }
             if (shell != null) {
-                if ("1".equals(prevAutoTime)) {
+                // Si se deja el reloj congelado, auto_time sigue en 0 para que el sistema no lo
+                // vuelva a sincronizar solo.
+                if (restore && "1".equals(prevAutoTime)) {
                     shell.exec("settings put global auto_time 1", 3000);
                 }
                 shell.close();
@@ -305,9 +311,9 @@ public class TimeWarpService extends Service {
     }
 
     private static String dpsLabel(double d) {
-        double a = Math.abs(d);
-        String n = (a == Math.rint(a)) ? String.valueOf((long) a) : String.valueOf(a);
-        return (d < 0 ? "-" : "+") + n + " día(s) por segundo";
+        double s = 1.0 / Math.abs(d); // segundos reales por día
+        String n = (s == Math.rint(s)) ? String.valueOf((long) s) : String.valueOf(Math.round(s * 100) / 100.0);
+        return (d < 0 ? "Hacia atrás: " : "") + "1 día cada " + n + " s";
     }
 
     private void ensureChannel() {

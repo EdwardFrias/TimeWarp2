@@ -30,6 +30,7 @@ public class MainActivity extends Activity {
     private EditText etDays;
     private CheckBox cbReverse;
     private CheckBox cbLoop;
+    private CheckBox cbRestore;
     private Button btnToggle;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -54,16 +55,16 @@ public class MainActivity extends Activity {
         root.setPadding(p, p, p, p);
 
         root.addView(text("TimeWarp", 28, true));
-        root.addView(text("1 segundo real = N días en el reloj del sistema Android.", 14, false));
+        root.addView(text("N segundos reales = 1 día en el reloj del sistema Android.", 14, false));
 
         tvRoot = text("Root: comprobando…", 14, false);
         tvRoot.setPadding(0, dp(12), 0, dp(12));
         root.addView(tvRoot);
 
-        root.addView(text("Días por segundo", 14, true));
+        root.addView(text("Segundos reales por cada día", 14, true));
         etDays = new EditText(this);
         etDays.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        etDays.setText("1");
+        etDays.setText("10");
         root.addView(etDays);
 
         cbReverse = new CheckBox(this);
@@ -73,6 +74,10 @@ public class MainActivity extends Activity {
         cbLoop = new CheckBox(this);
         cbLoop.setText("Al llegar al año 2037, volver a la fecha de inicio");
         root.addView(cbLoop);
+
+        cbRestore = new CheckBox(this);
+        cbRestore.setText("Al detener, devolver la hora real (si no, el reloj se queda donde está)");
+        root.addView(cbRestore);
 
         btnToggle = new Button(this);
         btnToggle.setOnClickListener(v -> onToggle());
@@ -117,20 +122,22 @@ public class MainActivity extends Activity {
     private void onToggle() {
         if (TimeWarpService.running) {
             startService(new Intent(this, TimeWarpService.class)
-                    .setAction(TimeWarpService.ACTION_STOP));
+                    .setAction(TimeWarpService.ACTION_STOP)
+                    .putExtra(TimeWarpService.EXTRA_RESTORE, cbRestore.isChecked()));
             return;
         }
-        double dps;
+        double secondsPerDay;
         try {
-            dps = Double.parseDouble(etDays.getText().toString().trim().replace(',', '.'));
+            secondsPerDay = Double.parseDouble(etDays.getText().toString().trim().replace(',', '.'));
         } catch (NumberFormatException e) {
             toast("Valor no válido");
             return;
         }
-        if (!(dps > 0) || dps > 3650) {
-            toast("Usa un valor entre 0 y 3650 días por segundo");
+        if (!(secondsPerDay >= 0.01 && secondsPerDay <= 10_000_000d)) {
+            toast("Usa un valor entre 0.01 y 10000000 segundos por día");
             return;
         }
+        double dps = 1.0 / secondsPerDay;
         Intent i = new Intent(this, TimeWarpService.class)
                 .setAction(TimeWarpService.ACTION_START)
                 .putExtra(TimeWarpService.EXTRA_DAYS_PER_SEC, dps)
@@ -167,7 +174,7 @@ public class MainActivity extends Activity {
         tvReal.setText("Hora real:\n" + fmt.format(new Date(real))
                 + (on ? "\nAdelanto simulado: " + diffDays + " días" : ""));
         tvStatus.setText("Estado: " + TimeWarpService.status);
-        btnToggle.setText(on ? "Detener y restaurar hora real" : "Iniciar TimeWarp");
+        btnToggle.setText(on ? "Detener" : "Iniciar TimeWarp");
     }
 
     private TextView text(String s, int sp, boolean bold) {
