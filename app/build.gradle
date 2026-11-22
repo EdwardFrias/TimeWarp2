@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.timewarp.ldplayer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.timewarp.ldplayer"
+        // LDPlayer 3/4 = Android 5.1 (API 22), LDPlayer 5/9 = Android 7/9 (API 24/28)
+        minSdk 21
+        targetSdk 28
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Firmado con la clave de depuración para que el APK release también se pueda instalar
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+// Sin dependencias externas: solo el SDK de Android.
