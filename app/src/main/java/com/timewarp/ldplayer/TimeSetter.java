@@ -67,6 +67,39 @@ final class TimeSetter {
         return false;
     }
 
+    /** true si ningún método logró fijar una fecha posterior a 2038 en este Android. */
+    volatile boolean highFailed = false;
+
+    private static boolean landed(long ms) {
+        return Math.abs(System.currentTimeMillis() - ms) <= 5_000L;
+    }
+
+    /**
+     * Para fechas posteriores a 2038. Muchos `date` de 32 bits fallan o dan la vuelta en silencio,
+     * así que se comprueba que la hora realmente quedó puesta; si no, se prueban los demás
+     * métodos (p. ej. `service call alarm`, que pasa milisegundos de 64 bits).
+     */
+    boolean setHigh(long ms) {
+        int cur = selected;
+        if (cur >= 0 && run(cur, ms) && landed(ms)) {
+            return true;
+        }
+        for (int id = 0; id < NAMES.length; id++) {
+            if (id == cur) {
+                continue;
+            }
+            if (id > 0 && shell == null) {
+                break;
+            }
+            if (run(id, ms) && landed(ms)) {
+                selected = id;
+                return true;
+            }
+        }
+        highFailed = true;
+        return false;
+    }
+
     /** Fija la hora del sistema con el método elegido en probe(). */
     boolean set(long epochMs) {
         int id = selected;

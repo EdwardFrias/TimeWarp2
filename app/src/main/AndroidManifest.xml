@@ -4,6 +4,7 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Solo las concede el sistema a apps firmadas con la clave de plataforma o instaladas en
          /system/priv-app. En un LDPlayer normal se usa root (su) y estos permisos no hacen falta. -->
@@ -31,6 +32,10 @@
 
         <service
             android:name=".TimeWarpService"
+            android:exported="false" />
+
+        <service
+            android:name=".FloatingService"
             android:exported="false" />
     </application>
 </manifest>

@@ -3,10 +3,12 @@ package com.timewarp.ldplayer;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -31,17 +33,19 @@ public class MainActivity extends Activity {
     private CheckBox cbReverse;
     private CheckBox cbLoop;
     private CheckBox cbRestore;
+    private CheckBox cbUnlimited;
     private Button btnToggle;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final SimpleDateFormat fmt =
             new SimpleDateFormat("EEE dd/MM/yyyy HH:mm:ss", new Locale("es"));
+    private final Date date = new Date();
 
     private final Runnable refresh = new Runnable() {
         @Override
         public void run() {
             updateUi();
-            ui.postDelayed(this, 250);
+            ui.postDelayed(this, 1000);
         }
     };
 
@@ -64,24 +68,38 @@ public class MainActivity extends Activity {
         root.addView(text("Segundos reales por cada día", 14, true));
         etDays = new EditText(this);
         etDays.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        etDays.setText("10");
+        etDays.setText(Prefs.num(Prefs.secondsPerDay(this)));
         root.addView(etDays);
 
         cbReverse = new CheckBox(this);
         cbReverse.setText("Retroceder en el tiempo");
+        cbReverse.setChecked(Prefs.reverse(this));
         root.addView(cbReverse);
 
         cbLoop = new CheckBox(this);
-        cbLoop.setText("Al llegar al año 2037, volver a la fecha de inicio");
+        cbLoop.setText("Al llegar al límite, volver a la fecha de inicio");
+        cbLoop.setChecked(Prefs.loop(this));
         root.addView(cbLoop);
+
+        cbUnlimited = new CheckBox(this);
+        cbUnlimited.setText("Quitar el límite de 2037 (hasta el año 9999; se detiene solo si el Android no lo admite)");
+        cbUnlimited.setChecked(Prefs.unlimited(this));
+        root.addView(cbUnlimited);
 
         cbRestore = new CheckBox(this);
         cbRestore.setText("Al detener, devolver la hora real (si no, el reloj se queda donde está)");
+        cbRestore.setChecked(Prefs.restore(this));
         root.addView(cbRestore);
 
         btnToggle = new Button(this);
         btnToggle.setOnClickListener(v -> onToggle());
         root.addView(btnToggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        Button btnFloat = new Button(this);
+        btnFloat.setText("Abrir ventana flotante");
+        btnFloat.setOnClickListener(v -> openFloating());
+        root.addView(btnFloat, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button btnRoot = new Button(this);
@@ -121,9 +139,9 @@ public class MainActivity extends Activity {
 
     private void onToggle() {
         if (TimeWarpService.running) {
-            startService(new Intent(this, TimeWarpService.class)
-                    .setAction(TimeWarpService.ACTION_STOP)
-                    .putExtra(TimeWarpService.EXTRA_RESTORE, cbRestore.isChecked()));
+            Prefs.save(this, Prefs.secondsPerDay(this), cbReverse.isChecked(),
+                    cbLoop.isChecked(), cbRestore.isChecked(), cbUnlimited.isChecked());
+            Prefs.stop(this);
             return;
         }
         double secondsPerDay;
@@ -137,17 +155,51 @@ public class MainActivity extends Activity {
             toast("Usa un valor entre 0.01 y 10000000 segundos por día");
             return;
         }
-        double dps = 1.0 / secondsPerDay;
-        Intent i = new Intent(this, TimeWarpService.class)
-                .setAction(TimeWarpService.ACTION_START)
-                .putExtra(TimeWarpService.EXTRA_DAYS_PER_SEC, dps)
-                .putExtra(TimeWarpService.EXTRA_REVERSE, cbReverse.isChecked())
-                .putExtra(TimeWarpService.EXTRA_LOOP, cbLoop.isChecked());
+        Prefs.save(this, secondsPerDay, cbReverse.isChecked(), cbLoop.isChecked(),
+                cbRestore.isChecked(), cbUnlimited.isChecked());
+        Prefs.start(this);
+    }
+
+    /** Abre la ventana flotante; si falta el permiso, intenta concederlo con root. */
+    private void openFloating() {
+        if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            new Thread(() -> {
+                RootShell s = RootShell.open();
+                if (s != null) {
+                    s.exec("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow", 4000);
+                    s.close();
+                }
+                runOnUiThread(() -> {
+                    if (Settings.canDrawOverlays(this)) {
+                        startFloating();
+                    } else {
+                        requestOverlayPermission();
+                    }
+                });
+            }, "grant-overlay").start();
+        } else {
+            startFloating();
+        }
+    }
+
+    private void requestOverlayPermission() {
+        toast("Concede «Mostrar sobre otras apps» a TimeWarp y pulsa el botón otra vez");
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) {
+            // la pantalla de permisos no existe en este sistema
+        }
+    }
+
+    private void startFloating() {
+        Intent i = new Intent(this, FloatingService.class).setAction(FloatingService.ACTION_SHOW);
         if (Build.VERSION.SDK_INT >= 26) {
             startForegroundService(i);
         } else {
             startService(i);
         }
+        moveTaskToBack(true);
     }
 
     private void checkRoot() {
@@ -159,8 +211,8 @@ public class MainActivity extends Activity {
                 s.close();
             }
             runOnUiThread(() -> tvRoot.setText(ok
-                    ? "Root: ✔ disponible"
-                    : "Root: ✘ no disponible. En LDPlayer: Ajustes → Otros ajustes → Permiso root."));
+                    ? "Root: disponible"
+                    : "Root: no disponible. En LDPlayer: Ajustes → Otros ajustes → Permiso root."));
         }, "root-check").start();
     }
 
@@ -170,8 +222,10 @@ public class MainActivity extends Activity {
         long real = on ? TimeWarpService.realNowMs() : sys;
         long diffDays = (sys - real) / WarpClock.DAY_MS;
 
-        tvSystem.setText("Hora del sistema (emulador):\n" + fmt.format(new Date(sys)));
-        tvReal.setText("Hora real:\n" + fmt.format(new Date(real))
+        date.setTime(sys);
+        tvSystem.setText("Hora del sistema (emulador):\n" + fmt.format(date));
+        date.setTime(real);
+        tvReal.setText("Hora real:\n" + fmt.format(date)
                 + (on ? "\nAdelanto simulado: " + diffDays + " días" : ""));
         tvStatus.setText("Estado: " + TimeWarpService.status);
         btnToggle.setText(on ? "Detener" : "Iniciar TimeWarp");

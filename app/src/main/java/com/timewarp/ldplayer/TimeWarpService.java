@@ -32,6 +32,7 @@ public class TimeWarpService extends Service {
     public static final String EXTRA_REVERSE = "reverse";
     public static final String EXTRA_LOOP = "loop";
     public static final String EXTRA_RESTORE = "restore"; // solo en ACTION_STOP
+    public static final String EXTRA_UNLIMITED = "unlimited";
 
     private static final String CHANNEL_ID = "timewarp";
     private static final int NOTIF_ID = 1;
@@ -58,6 +59,7 @@ public class TimeWarpService extends Service {
     private TimeSetter setter;
     private double daysPerSecond = 1.0;
     private boolean loop = false;
+    private boolean unlimited = false;
     private String prevAutoTime = null;
     private int failures = 0;
     private long loops = 0;
@@ -99,6 +101,7 @@ public class TimeWarpService extends Service {
             }
             boolean reverse = intent.getBooleanExtra(EXTRA_REVERSE, false);
             loop = intent.getBooleanExtra(EXTRA_LOOP, false);
+            unlimited = intent.getBooleanExtra(EXTRA_UNLIMITED, false);
             daysPerSecond = reverse ? -dps : dps;
             startElapsed = SystemClock.elapsedRealtime();
             startWall = System.currentTimeMillis();
@@ -110,6 +113,7 @@ public class TimeWarpService extends Service {
             daysPerSecond = Double.longBitsToDouble(
                     prefs.getLong("dps", Double.doubleToLongBits(1.0)));
             loop = prefs.getBoolean("loop", false);
+            unlimited = prefs.getBoolean("unlimited", false);
         } else {
             stopForeground(true);
             stopSelf();
@@ -170,21 +174,39 @@ public class TimeWarpService extends Service {
         try {
             long nowElapsed = SystemClock.elapsedRealtime();
             long virtual = clock.virtualAt(nowElapsed);
+            boolean loopChanged = false;
 
-            if (WarpClock.outOfRange(virtual)) {
+            if (WarpClock.outOfRange(virtual, unlimited)) {
                 if (loop) {
                     clock = new WarpClock(startWall, nowElapsed, daysPerSecond);
                     virtual = startWall;
                     loops++;
+                    loopChanged = true;
                 } else {
-                    requestStop("Límite de fecha alcanzado (1971–2037): reloj detenido", false);
+                    requestStop(unlimited
+                            ? "Límite de fecha alcanzado (1971–9999): reloj detenido"
+                            : "Límite de fecha alcanzado (1971–2037): reloj detenido", false);
                     return;
                 }
             }
 
-            if (setter.set(virtual)) {
-                failures = 0;
-                status = "Activo · " + setter.strategyName() + (loops > 0 ? " · vueltas: " + loops : "");
+            // Pasada 2038 se verifica que la hora realmente cambió (ver TimeSetter.setHigh)
+            boolean high = virtual >= WarpClock.INT32_MS;
+            if (high && setter.highFailed) {
+                requestStop("Este Android no admite fechas posteriores a 2038: reloj detenido antes de ese límite", false);
+                return;
+            }
+            boolean applied = high ? setter.setHigh(virtual) : setter.set(virtual);
+            if (high && !applied && setter.highFailed) {
+                requestStop("Este Android no admite fechas posteriores a 2038: reloj detenido antes de ese límite", false);
+                return;
+            }
+            if (applied) {
+                // El texto de estado solo se reconstruye cuando cambia algo (sin basura por tick)
+                if (failures != 0 || loopChanged) {
+                    failures = 0;
+                    status = activeText();
+                }
             } else {
                 failures++;
                 if (failures >= 3) {
@@ -291,6 +313,7 @@ public class TimeWarpService extends Service {
                 .putLong("startElapsed", startElapsed)
                 .putLong("dps", Double.doubleToLongBits(daysPerSecond))
                 .putBoolean("loop", loop)
+                .putBoolean("unlimited", unlimited)
                 .commit();
     }
 
@@ -316,29 +339,11 @@ public class TimeWarpService extends Service {
         return (d < 0 ? "Hacia atrás: " : "") + "1 día cada " + n + " s";
     }
 
-    private void ensureChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
-                nm.createNotificationChannel(new NotificationChannel(
-                        CHANNEL_ID, "TimeWarp", NotificationManager.IMPORTANCE_LOW));
-            }
-        }
+    private String activeText() {
+        return "Activo · " + setter.strategyName() + (loops > 0 ? " · vueltas: " + loops : "");
     }
 
     private Notification buildNotification(String text) {
-        ensureChannel();
-        Intent open = new Intent(this, MainActivity.class);
-        int piFlags = Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0;
-        PendingIntent pi = PendingIntent.getActivity(this, 0, open, piFlags);
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(this, CHANNEL_ID)
-                : new Notification.Builder(this);
-        return b.setContentTitle("TimeWarp activo")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_menu_recent_history)
-                .setContentIntent(pi)
-                .setOngoing(true)
-                .build();
+        return Notif.build(this, "TimeWarp activo", text);
     }
 }

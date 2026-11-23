@@ -7,20 +7,32 @@ Activa root: **Ajustes → Otros ajustes → Permiso root** (el nombre puede var
 
 ## Compilar el APK
 Opción A, Android Studio: abre esta carpeta y usa *Build → Build APK(s)*.
-Opción B, terminal (JDK 17 + Android SDK con plataforma 34): `./gradlew assembleDebug`.
+Opción B, terminal (JDK 17 + Android SDK con plataforma 34): `./gradlew assembleRelease` (APK optimizado con R8 y firmado con la clave de depuración).
 Opción C, sin instalar nada: sube la carpeta a un repositorio de GitHub; el workflow *Build APK* deja el APK como artefacto.
 
-El APK queda en `app/build/outputs/apk/debug/app-debug.apk`.
+El APK optimizado queda en `app/build/outputs/apk/release/app-release.apk`. En Android Studio elige la variante *release* en *Build Variants*; con `assembleDebug` sale la versión debug en `debug/app-debug.apk`.
 
 ## Instalar y usar
 Arrastra el APK a la ventana de LDPlayer (o *Instalar APK*), abre **TimeWarp**, pulsa *Comprobar root* y luego *Iniciar TimeWarp*.
 Al pulsar *Detener* el reloj se queda en la fecha en la que estaba. Si marcas *Al detener, devolver la hora real*, se restaura la hora real.
 
+## Ventana flotante
+Pulsa *Abrir ventana flotante*. La primera vez hace falta el permiso «Mostrar sobre otras apps»: con root, la app lo concede sola (`appops`); si no, abre la pantalla de permisos para que lo actives tú.
+La ventana se arrastra, muestra la hora del sistema y tiene *Iniciar/Detener*, *App* (abre la pantalla principal) y *–* (la minimiza a una burbuja «TW»; tócala para expandirla). *X* cierra la ventana sin detener TimeWarp. Usa los ajustes guardados en la pantalla principal.
+
 ## Cómo funciona
 - Hora virtual = hora de inicio + segundos reales × días/segundo × 86400, calculada con el reloj monotónico (`elapsedRealtime`), sin deriva.
 - Al iniciar prueba varios métodos (`AlarmManager.setTime`, `date` toybox/toolbox, `service call alarm`) y usa el primero que verifica que cambió la hora.
 - Desactiva `auto_time` mientras corre. Solo lo restaura si detienes con la opción de devolver la hora real; si no, queda desactivado para que el sistema no vuelva a sincronizar la hora por su cuenta.
-- Límite 1971–2037: el `time_t` de 32 bits de Android desborda en 2038. Al llegar, el reloj se detiene (o vuelve al inicio si activas el bucle).
+- Límite por defecto 1971–2037: el `time_t` de 32 bits de Android desborda en 2038. Al llegar, el reloj se detiene (o vuelve al inicio si activas el bucle).
+- Casilla *Quitar el límite de 2037*: permite llegar hasta el año 9999. Pasada la fecha 2038-01-19 la app verifica en cada cambio que la hora realmente quedó puesta y, si el método actual falla, prueba los demás (`service call alarm` usa milisegundos de 64 bits). Si ninguno funciona, el reloj se detiene justo antes de 2038. Depende del Android del emulador (en LDPlayer de 64 bits suele funcionar).
+
+## Optimización
+- Sin dependencias externas; en release, R8 y `shrinkResources`.
+- Una sola shell `su` persistente, y los comandos de hora se construyen con aritmética (sin `SimpleDateFormat`) para no generar basura cada segundo.
+- El texto de estado solo se reconstruye cuando cambia.
+- La interfaz flotante se actualiza 1 vez por segundo, y se pausa si está minimizada o la pantalla se apaga.
+- Se mantiene un wake lock parcial mientras TimeWarp corre, para que el reloj siga avanzando con la pantalla apagada.
 
 ## Avisos
 - Con la fecha saltando, HTTPS, inicios de sesión y Google Play Services suelen fallar (certificados "caducados"/"aún no válidos").
